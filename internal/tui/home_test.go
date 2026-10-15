@@ -426,3 +426,59 @@ func TestHomeFitsScratchpad(t *testing.T) {
 		}
 	}
 }
+
+func TestBookFlow(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	m := New(v, "true")
+	m.width, m.height = 120, 60
+	m.prefDir = filepath.Join(root, "prefs")
+	m.trashDir = filepath.Join(root, "cache", "trash")
+	m = key(m, "B")
+	if m.screen != screenBooks || !strings.Contains(m.View(), "no books yet") {
+		t.Fatalf("books screen:\n%s", m.View())
+	}
+	m = key(m, "n")
+	m = key(m, "Hot Desk")
+	m = key(m, "enter")
+	m = key(m, "60000")
+	m = key(m, "enter")
+	if m.screen != screenBook || m.book == nil || m.book.Target != 60000 {
+		t.Fatalf("new book should open its screen: screen=%d book=%+v", m.screen, m.book)
+	}
+	m = key(m, "a")
+	m = key(m, "The desk")
+	m = key(m, "enter")
+	if len(m.book.Chapters) != 1 || !m.book.Chapters[0].Exists {
+		t.Fatalf("chapter not created: %+v", m.book.Chapters)
+	}
+	m = key(m, "s")
+	if m.book.Chapters[0].State != "DRAFT" {
+		t.Fatalf("stage cycle failed: %+v", m.book.Chapters[0])
+	}
+	os.WriteFile(m.book.Chapters[0].File, []byte("#+TITLE: The desk\n\nten words of prose go right here for the count\n"), 0o644)
+	m = key(m, "r")
+	out := m.View()
+	if !strings.Contains(out, "10 words") || !strings.Contains(out, "+10 words") || !strings.Contains(out, "draft") {
+		t.Fatalf("book header should show totals and today's words:\n%s", out)
+	}
+	// Home shows the book line and B goes straight to the only book.
+	m = key(m, "h")
+	m = key(m, "h")
+	if !strings.Contains(m.View(), "Hot Desk 10 (+10 today)") {
+		t.Fatalf("home books line:\n%s", m.View())
+	}
+	m = key(m, "B")
+	if m.screen != screenBook {
+		t.Fatalf("B with one book should open it, got %d", m.screen)
+	}
+	// Guide opens and returns.
+	m = key(m, "H")
+	if m.screen != screenGuide || !strings.Contains(m.View(), "zettelkasten holds the ideas") {
+		t.Fatalf("guide:\n%s", m.View())
+	}
+	m = key(m, "h")
+	if m.screen != screenBook {
+		t.Fatalf("back from guide should return to the book, got %d", m.screen)
+	}
+}

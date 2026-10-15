@@ -63,6 +63,9 @@ const (
 	screenGoals
 	screenGoal
 	screenGoalWalk
+	screenBooks
+	screenBook
+	screenGuide
 )
 
 type filter int
@@ -95,6 +98,9 @@ const (
 	modeGoalKeywords
 	modeMilestone
 	modeReview
+	modeChapter
+	modeBookTitle
+	modeBookTarget
 )
 
 type rowKind int
@@ -106,6 +112,8 @@ const (
 	rowGoal
 	rowMilestone
 	rowReview
+	rowBook
+	rowChapter
 )
 
 // item is one cursor row on any screen.
@@ -132,6 +140,7 @@ type frame struct {
 	screen screen
 	note   string
 	goal   string
+	book   string
 	filter filter
 	cursor int
 	query  string
@@ -179,6 +188,11 @@ type Model struct {
 	goalID string
 	draft  goalDraft
 	walk   goalWalk
+
+	books    []vault.Book
+	book     *vault.Book
+	bookSlug string
+	tipSeed  int
 }
 
 func New(v vault.Vault, editor string) Model {
@@ -231,6 +245,7 @@ func (m *Model) reload() {
 	}
 	m.ix = ix
 	m.loadGoals()
+	m.loadBooks()
 	m.onThis = vault.OnThisDay(days, m.now)
 	m.today = nil
 	todayKey := m.now.Format("2006-01-02")
@@ -252,6 +267,11 @@ func (m *Model) reload() {
 		return
 	case screenGoal, screenGoalWalk:
 		if m.goal == nil {
+			m.back()
+			return
+		}
+	case screenBook:
+		if m.book == nil {
 			m.back()
 			return
 		}
@@ -281,6 +301,9 @@ func (m *Model) buildItems() {
 	m.items = m.items[:0]
 	switch m.screen {
 	case screenHome:
+		for i := range m.books {
+			m.items = append(m.items, m.bookItem("books", &m.books[i]))
+		}
 		for i, g := range m.activeGoals() {
 			if i >= 5 {
 				break
@@ -292,6 +315,8 @@ func (m *Model) buildItems() {
 		m.fitHome()
 	case screenGoals, screenGoal, screenGoalWalk:
 		m.buildGoalItems()
+	case screenBooks, screenBook:
+		m.buildBookItems()
 	case screenNotes:
 		q := strings.ToLower(strings.TrimSpace(m.query))
 		match := func(n *index.Node) bool {
@@ -393,8 +418,11 @@ func (m *Model) fitHome() {
 			return
 		}
 		m.items = m.items[:0]
+		for i := range m.books {
+			m.items = append(m.items, m.bookItem("books", &m.books[i]))
+		}
 		for _, g := range m.activeGoals() {
-			if len(m.items) >= 5 {
+			if len(m.items) >= 5+len(m.books) {
 				break
 			}
 			m.items = append(m.items, m.goalItem("goals", g))
@@ -405,7 +433,7 @@ func (m *Model) fitHome() {
 
 // homeRows is the height of everything above the key panel, padding included.
 func (m Model) homeRows() int {
-	return strings.Count(m.renderTop(), "\n") + strings.Count(m.renderRows(), "\n") + 2 + 1
+	return strings.Count(m.renderTop(), "\n") + strings.Count(m.renderRows(), "\n") + 2 + 1 + 2 // tip line
 }
 
 func stamp(n *index.Node) time.Time {
@@ -446,7 +474,11 @@ func (m *Model) push() {
 	if m.goal != nil {
 		f.goal = m.goal.ID
 	}
+	if m.book != nil {
+		f.book = m.book.Slug
+	}
 	m.stack = append(m.stack, f)
+	m.tipSeed++
 }
 
 func (m *Model) back() {
@@ -465,6 +497,16 @@ func (m *Model) back() {
 		} else {
 			m.goal, m.goalID = nil, ""
 		}
+		if f.screen == screenBook {
+			b := m.findBook(f.book)
+			if b == nil {
+				continue
+			}
+			m.book, m.bookSlug = b, b.Slug
+		} else {
+			m.book, m.bookSlug = nil, ""
+		}
+		m.tipSeed++
 		if f.screen == screenNote {
 			n := m.ix.Get(f.note)
 			if n == nil {
@@ -478,7 +520,8 @@ func (m *Model) back() {
 		m.buildItems()
 		return
 	}
-	m.screen, m.note, m.goal, m.goalID, m.cursor, m.query = screenHome, nil, nil, "", 0, ""
+	m.screen, m.note, m.goal, m.goalID, m.book, m.bookSlug, m.cursor, m.query = screenHome, nil, nil, "", nil, "", 0, ""
+	m.tipSeed++
 	m.buildItems()
 }
 
@@ -530,6 +573,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateNewGoal(msg)
 		case modeMilestone, modeReview:
 			return m.updateGoalInput(msg)
+		case modeChapter, modeBookTitle, modeBookTarget:
+			return m.updateBookInput(msg)
 		case modeConfirmDelete:
 			return m.updateConfirmDelete(msg)
 		case modePick:
@@ -564,6 +609,22 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.screen == screenHome {
 			m.openGoals()
 		}
+	case kBooks:
+		if m.screen == screenHome {
+			if len(m.books) == 0 {
+				m.push()
+				m.screen, m.cursor = screenBooks, 0
+				m.buildItems()
+			} else {
+				m.openBooks()
+			}
+		}
+	case kGuide:
+		if m.screen != screenGuide {
+			m.push()
+			m.screen, m.cursor = screenGuide, 0
+			m.items = m.items[:0]
+		}
 	case kToggle:
 		if cur != nil && cur.kind == rowMilestone {
 			if err := m.v.ToggleMilestone(cur.line); err != nil {
@@ -585,6 +646,16 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch {
+		case cur.kind == rowBook:
+			m.openBook(cur.key)
+		case cur.kind == rowChapter:
+			if c := m.chapterAt(cur); c != nil {
+				if err := m.v.EnsureChapterFile(*m.book, *c); err != nil {
+					m.status = err.Error()
+					return m, nil
+				}
+				return m, m.edit(c.File, true)
+			}
 		case cur.kind == rowGoal:
 			m.openGoal(cur.key)
 		case cur.kind == rowMilestone:
@@ -614,23 +685,47 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.editAt(m.v.GoalsPath(), m.goal.Line+1)
 		case cur != nil && cur.kind == rowGoal:
 			return m, m.editAt(cur.path, cur.line+1)
+		case cur != nil && cur.kind == rowBook:
+			return m, m.edit(cur.path, false)
+		case m.screen == screenBook:
+			return m, m.edit(m.book.Outline, false)
 		case cur != nil && cur.path != "":
 			return m, m.edit(cur.path, false)
 		}
-	case kAll: // also kAddMilestone
+	case kAll: // also kAddMilestone, kAddChapter
 		switch m.screen {
 		case screenHome:
 			m.openNotes(filterAll)
 		case screenGoal:
 			return m, m.startMilestone()
+		case screenBook:
+			return m, m.startChapter()
 		}
 	case kFleeting:
 		if m.screen == screenHome {
 			m.openNotes(filterFleeting)
 		}
-	case kOrphans:
-		if m.screen == screenHome {
+	case kOrphans: // also kOutline
+		switch m.screen {
+		case screenHome:
 			m.openNotes(filterOrphans)
+		case screenBook:
+			if c := m.chapterAt(cur); c != nil {
+				return m, m.editAt(m.book.Outline, c.Line+1)
+			}
+			return m, m.edit(m.book.Outline, false)
+		}
+	case kSkip: // kStage on the book screen
+		if m.screen == screenBook {
+			if c := m.chapterAt(cur); c != nil {
+				next, err := m.v.CycleStage(*m.book, *c)
+				if err != nil {
+					m.status = err.Error()
+				} else {
+					m.reload()
+					m.status = c.Title + " → " + strings.ToLower(next)
+				}
+			}
 		}
 	case kMissing:
 		if m.screen == screenHome {
@@ -691,6 +786,9 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case kNew:
 		if m.screen == screenGoals {
 			return m, m.startNewGoal()
+		}
+		if m.screen == screenBooks {
+			return m, m.startNewBook()
 		}
 		m.linkFrom = ""
 		return m, m.startNew()
@@ -994,6 +1092,12 @@ func (m Model) renderTop() string {
 			title += sDim.Render("  ›  ") + sValue.Render("goals")
 		case screenGoal, screenGoalWalk:
 			title += sDim.Render("  ›  ") + sValue.Render(m.goal.Title)
+		case screenBooks:
+			title += sDim.Render("  ›  ") + sValue.Render("books")
+		case screenBook:
+			title += sDim.Render("  ›  ") + sValue.Render(m.book.Title)
+		case screenGuide:
+			title += sDim.Render("  ›  ") + sValue.Render("how tiller fits together")
 		}
 		gap := max(1, m.width-4-lipgloss.Width(title)-lipgloss.Width(date))
 		b.WriteString(title + strings.Repeat(" ", gap) + date + "\n\n")
@@ -1012,6 +1116,12 @@ func (m Model) renderTop() string {
 		m.viewGoalsHeader(&b)
 	case screenGoal, screenGoalWalk:
 		m.viewGoalHeader(&b)
+	case screenBooks:
+		m.viewBooksHeader(&b)
+	case screenBook:
+		m.viewBookHeader(&b)
+	case screenGuide:
+		m.viewGuide(&b)
 	}
 	return b.String()
 }
@@ -1043,6 +1153,10 @@ func (m Model) View() string {
 		b.WriteString("\n" + sDim.Render("  nothing here") + "\n")
 	case m.screen == screenGoals && len(m.items) == 0:
 		b.WriteString("\n" + sDim.Render("  no goals yet. n starts one: what you want, why, by when, and the words that mean you touched it") + "\n")
+	case m.screen == screenBooks && len(m.items) == 0:
+		b.WriteString("\n" + sDim.Render("  no books yet. n starts one: a title and a word target") + "\n")
+	case m.screen == screenBook && len(m.items) == 0:
+		b.WriteString("\n" + sDim.Render("  no chapters yet. a adds the first; its prose file is created beside the outline") + "\n")
 	}
 
 	switch m.mode {
@@ -1076,6 +1190,14 @@ func (m Model) View() string {
 		b.WriteString("  " + m.input.View() + "\n")
 	case modeMilestone:
 		b.WriteString("\n" + sHeader.Render("new milestone") + "\n  " + m.input.View() + "\n")
+	case modeChapter:
+		b.WriteString("\n" + sHeader.Render("new chapter") + "\n  " + m.input.View() + "\n")
+	case modeBookTitle, modeBookTarget:
+		b.WriteString("\n" + sHeader.Render("new book") + "\n")
+		if m.draft.title != "" {
+			b.WriteString(sDim.Render("  "+m.draft.title) + "\n")
+		}
+		b.WriteString("  " + m.input.View() + "\n")
 	case modeReview:
 		b.WriteString("\n" + sHeader.Render("review") + sDim.Render("  one line, dated, kept under the goal; enter with nothing skips") + "\n  " + m.input.View() + "\n")
 	case modeTags:
@@ -1090,6 +1212,9 @@ func (m Model) View() string {
 	}
 	if m.status != "" {
 		b.WriteString("\n" + sDim.Render(m.status) + "\n")
+	}
+	if tip := m.tip(); tip != "" && m.mode == modeBrowse && m.showKeys {
+		b.WriteString("\n" + sDim.Render("tip  ") + sValue.Render(tip) + "\n")
 	}
 	body := b.String()
 	// The panel is the default; when the screen can't fit it, the help wraps
@@ -1130,6 +1255,18 @@ func (m Model) viewHomeStats(b *strings.Builder) {
 		linkLine += "   " + sWarn.Render(fmt.Sprintf("%d referenced but unwritten", missing)) + sDim.Render("  m")
 	}
 	b.WriteString(sLabel.Render("links") + linkLine + "\n")
+	if len(m.books) > 0 {
+		var parts []string
+		for i := range m.books {
+			bk := &m.books[i]
+			p := fmt.Sprintf("%s %s", bk.Title, group(bk.Words()))
+			if t := vault.WordsToday(*bk, m.cacheDir(), m.now); t != 0 {
+				p += fmt.Sprintf(" (%+d today)", t)
+			}
+			parts = append(parts, p)
+		}
+		b.WriteString(sLabel.Render("books") + sValue.Render(strings.Join(parts, "   ")) + sDim.Render("  B") + "\n")
+	}
 	if active := m.activeGoals(); len(active) > 0 {
 		quiet := 0
 		for _, g := range active {
@@ -1257,6 +1394,10 @@ func (l layout) header(kind rowKind) string {
 		return "  " + h("missing note", l.title) + colGap + h("wanted by", l.tags+l.links+l.age+2*len(colGap))
 	case rowGoal:
 		return "  " + h("goal", l.title) + colGap + h("milestones", l.tags) + colGap + h("by", l.links) + colGap + h("journal", l.age)
+	case rowBook:
+		return "  " + h("book", l.title) + colGap + h("words / target", l.tags) + colGap + h("today", l.links+2) + colGap + h("edited", l.age)
+	case rowChapter:
+		return "  " + h("stage", 8) + " " + h("chapter", l.title-9) + colGap + h("promise", l.tags) + colGap + h("words", l.links) + colGap + h("edited", l.age)
 	case rowMilestone:
 		return "  " + h("step", l.title+4)
 	case rowReview:
@@ -1290,6 +1431,24 @@ func (l layout) row(it item, selected bool) string {
 			touched = sWarn.Render(pad(it.age, l.age))
 		}
 		return cur + title.Render(pad(it.label, l.title)) + colGap + prog + colGap + sDim.Render(pad(it.horizon, l.links)) + colGap + touched
+	case rowBook:
+		prog := sValue.Render(pad(group(it.degree), 8))
+		if it.words > 0 {
+			prog += bar(min(it.degree, it.words), it.words, l.tags-9) + " "
+		} else {
+			prog = sValue.Render(pad(group(it.degree)+" words", l.tags))
+		}
+		return cur + title.Render(pad(it.label, l.title)) + colGap + prog + colGap + sDim.Render(pad(it.horizon, l.links+2)) + colGap + sDim.Render(pad(it.age, l.age))
+	case rowChapter:
+		stage := sDim.Render(pad(it.horizon, 8))
+		if it.horizon == "draft" || it.horizon == "revise" {
+			stage = sCursor.Render(pad(it.horizon, 8))
+		}
+		promise := ""
+		if len(it.tags) > 0 {
+			promise = it.tags[0]
+		}
+		return cur + stage + " " + title.Render(pad(it.label, l.title-9)) + colGap + sDim.Render(pad(promise, l.tags)) + colGap + sValue.Render(pad(group(it.degree)+"w", l.links)) + colGap + sDim.Render(pad(it.age, l.age))
 	case rowMilestone:
 		box := sDim.Render("[ ]")
 		if it.done {

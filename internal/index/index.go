@@ -4,11 +4,13 @@
 package index
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/paulhmurray/tiller/internal/org"
 	"github.com/paulhmurray/tiller/internal/vault"
 )
 
@@ -17,6 +19,7 @@ type Kind int
 const (
 	KindNote Kind = iota
 	KindDay
+	KindChapter // a book's outline or chapter file; a link source and target, never a note
 )
 
 type Node struct {
@@ -31,6 +34,7 @@ type Node struct {
 	Created time.Time
 	ModTime time.Time
 	Date    time.Time // days only
+	Book    string    // chapters only: the book title
 }
 
 func (n *Node) HasTag(t string) bool {
@@ -47,6 +51,8 @@ func (n *Node) Life() string {
 	switch {
 	case n.Kind == KindDay:
 		return "day"
+	case n.Kind == KindChapter:
+		return "chapter"
 	case n.HasTag(vault.FleetingTag):
 		return "fleeting"
 	case n.HasTag("literature"):
@@ -64,6 +70,8 @@ type Index struct {
 	Backlinks map[string][]string // key -> source keys
 	Dangling  map[string][]string // missing target label -> source keys
 	bySlug    map[string]*Node
+	byRel     map[string]*Node // root-relative path -> node, for file: links with a directory
+	root      string
 }
 
 func Build(v vault.Vault) (*Index, error) {
@@ -75,12 +83,18 @@ func Build(v vault.Vault) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	books, err := v.Books()
+	if err != nil {
+		return nil, err
+	}
 	ix := &Index{
 		Nodes:     map[string]*Node{},
 		Outgoing:  map[string][]string{},
 		Backlinks: map[string][]string{},
 		Dangling:  map[string][]string{},
 		bySlug:    map[string]*Node{},
+		byRel:     map[string]*Node{},
+		root:      v.Root,
 	}
 	rawLinks := map[string][]string{}
 	for _, n := range notes {
@@ -94,7 +108,33 @@ func Build(v vault.Vault) (*Index, error) {
 			continue
 		}
 		ix.bySlug[strings.ToLower(n.Slug)] = node
+		ix.byRel[rel(v.Root, n.Path)] = node
 		rawLinks[node.Key] = n.Links
+	}
+	for _, b := range books {
+		files := []struct{ path, title string }{{b.Outline, b.Title + " · outline"}}
+		for _, c := range b.Chapters {
+			if c.Exists {
+				files = append(files, struct{ path, title string }{c.File, b.Title + " · " + c.Title})
+			}
+		}
+		for _, f := range files {
+			r := rel(v.Root, f.path)
+			node := &Node{ID: "book:" + r, Key: "book:" + r, Slug: r, Title: f.title, Kind: KindChapter, Path: f.path, Book: b.Title}
+			if st, err := os.Stat(f.path); err == nil {
+				node.ModTime = st.ModTime()
+			}
+			if !ix.add(node) {
+				continue
+			}
+			ix.byRel[r] = node
+			if doc, err := org.ParseFile(f.path); err == nil {
+				node.Words = org.Words(doc.Lines[doc.BodyStart:])
+				for _, l := range doc.Links() {
+					rawLinks[node.Key] = append(rawLinks[node.Key], l.Target)
+				}
+			}
+		}
 	}
 	for i := len(days) - 1; i >= 0; i-- {
 		d := days[i]
@@ -108,7 +148,7 @@ func Build(v vault.Vault) (*Index, error) {
 	for _, src := range ix.Order {
 		seen := map[string]bool{}
 		for _, raw := range rawLinks[src] {
-			target, label, relevant := ix.Resolve(raw)
+			target, label, relevant := ix.resolveFrom(ix.Nodes[src].Path, raw)
 			if !relevant {
 				continue
 			}
@@ -145,6 +185,41 @@ func (ix *Index) add(n *Node) bool {
 // tiller does not track (https, mailto, ...). When relevant and node is
 // nil, label names the missing target.
 func (ix *Index) Resolve(raw string) (node *Node, label string, relevant bool) {
+	return ix.resolveFrom("", raw)
+}
+
+// resolveFrom also tries file: targets with a directory part relative to
+// the linking file, so an outline can point at ../../notes/mara.org or a
+// hub at book/hot-desk/outline.org.
+func (ix *Index) resolveFrom(from, raw string) (node *Node, label string, relevant bool) {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(raw), "file:") {
+		path, _, _ := strings.Cut(raw[5:], "::")
+		path = strings.TrimSpace(path)
+		if strings.Contains(path, "/") && strings.HasSuffix(path, ".org") {
+			var cands []string
+			if from != "" {
+				cands = append(cands, rel(ix.root, filepath.Join(filepath.Dir(from), path)))
+			}
+			cands = append(cands, filepath.Clean(path))
+			for _, c := range cands {
+				if n, ok := ix.byRel[c]; ok {
+					return n, "", true
+				}
+			}
+		}
+	}
+	return ix.resolve(raw)
+}
+
+func rel(root, p string) string {
+	if r, err := filepath.Rel(root, p); err == nil {
+		return r
+	}
+	return p
+}
+
+func (ix *Index) resolve(raw string) (node *Node, label string, relevant bool) {
 	raw = strings.TrimSpace(raw)
 	switch {
 	case strings.HasPrefix(strings.ToLower(raw), "id:"):

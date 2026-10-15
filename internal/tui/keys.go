@@ -16,6 +16,8 @@ const (
 	kDown         = "j"
 	kUp           = "k"
 	kGoals        = "G"
+	kBooks        = "B"
+	kGuide        = "H"
 	kToggle       = "x"
 	kAddMilestone = "a"
 	kReview       = "R"
@@ -66,8 +68,18 @@ var (
 	keysHome = concat(keysNav, []binding{
 		{kEnter, "open note / journal day", true}, {kEdit, "edit in nvim", true},
 		{kAll, "all notes", true}, {kFleeting, "fleeting inbox", true}, {kOrphans, "orphans", true}, {kMissing, "missing notes", true},
-		{kProcess, "process the inbox", true}, {kGoals, "goals", true},
+		{kProcess, "process the inbox", true}, {kGoals, "goals", true}, {kBooks, "books", true}, {kGuide, "how it fits together", true},
 	}, keysCommon)
+	keysBooks = concat(keysNav, []binding{
+		{kEnter, "open book", true}, {kEdit, "edit outline in nvim", true}, {kNew, "new book", true}, {kBack, "back", true},
+	}, without(keysCommon, kNew))
+	keysBook = concat(keysNav, []binding{
+		{kEnter, "write: open the chapter in nvim", true}, {kOrphans, "open outline at this chapter", true}, {kSkip, "cycle stage", true},
+		{kAll, "add a chapter", true}, {kEdit, "edit the outline", false}, {kBack, "back", true},
+	}, keysCommon)
+	keysGuide = []binding{
+		{kBack, "back", true}, {kHelp, "hide / show these keys", false}, {kQuit, "quit", true},
+	}
 	keysGoals = concat(keysNav, []binding{
 		{kEnter, "open goal", true}, {kEdit, "edit in nvim", true}, {kNew, "new goal", true}, {kProcess, "weekly review walk", true},
 		{kBack, "back", true},
@@ -130,7 +142,7 @@ func (m Model) bindings() []binding {
 		return keysPicker
 	case modeNewKind:
 		return keysNewKind
-	case modeNewNote, modeSearch, modeTags, modeJournal, modeGoalTitle, modeGoalWhy, modeGoalHorizon, modeGoalKeywords, modeMilestone, modeReview:
+	case modeNewNote, modeSearch, modeTags, modeJournal, modeGoalTitle, modeGoalWhy, modeGoalHorizon, modeGoalKeywords, modeMilestone, modeReview, modeChapter, modeBookTitle, modeBookTarget:
 		return keysInput
 	case modeConfirmDelete:
 		return keysConfirm
@@ -146,6 +158,12 @@ func (m Model) bindings() []binding {
 		return keysGoals
 	case screenGoal, screenGoalWalk:
 		return keysGoal
+	case screenBooks:
+		return keysBooks
+	case screenBook:
+		return keysBook
+	case screenGuide:
+		return keysGuide
 	}
 	return keysHome
 }

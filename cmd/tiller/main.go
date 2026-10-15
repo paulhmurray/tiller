@@ -117,6 +117,37 @@ func run(args []string) error {
 			return nil
 		}
 		return graph.Open(path)
+	case "book":
+		if len(args) >= 3 && args[1] == "new" {
+			fs := flag.NewFlagSet("book new", flag.ContinueOnError)
+			target := fs.Int("target", 70000, "word target")
+			rest := args[2:]
+			var title []string
+			for i := 0; i < len(rest); i++ {
+				if rest[i] == "-target" || rest[i] == "--target" {
+					if i+1 < len(rest) {
+						fs.Parse(rest[i : i+2])
+						i++
+					}
+					continue
+				}
+				title = append(title, rest[i])
+			}
+			b, err := v.NewBook(strings.Join(title, " "), *target, time.Now())
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s  (%s)\n", b.Title, rel(v.Root, b.Outline))
+			return nil
+		}
+		books, err := v.Books()
+		if err != nil {
+			return err
+		}
+		for _, b := range books {
+			fmt.Printf("%-30s %6d / %d words, %d chapters\n", b.Title, b.Words(), b.Target, len(b.Chapters))
+		}
+		return nil
 	case "quote":
 		text, who := tui.QuoteFor(time.Now())
 		fmt.Printf("%s\n  — %s\n", text, who)
@@ -134,6 +165,7 @@ const usage = `usage:
   tiller new <title...>  create a fleeting note and open it
   tiller today           print today's journal path
   tiller migrate [-n]    convert journal.org + zettelkasten/ to the vault layout
+  tiller book            list books; book new <title> [-target N] starts one
   tiller quote           print today's quote
   tiller graph           render the link graph to ~/.cache/tiller/graph.html and open it
                          (-o path to write elsewhere, --no-open to just write)

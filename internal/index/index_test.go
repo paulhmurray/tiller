@@ -83,3 +83,29 @@ func TestSuggest(t *testing.T) {
 		t.Errorf("suggest = %v", titles)
 	}
 }
+
+func TestBookLinks(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	write(t, filepath.Join(v.NotesPath(), "mara.org"), ":PROPERTIES:\n:ID: mara\n:END:\n#+TITLE: Mara\n")
+	write(t, filepath.Join(v.NotesPath(), "hub.org"), "#+TITLE: Hub\n[[file:../book/hot-desk/outline.org][outline]]\n")
+	write(t, filepath.Join(v.BooksPath(), "hot-desk", "outline.org"), "#+TITLE: Hot Desk\n\n* OUTLINE The desk\n  :PROPERTIES:\n  :FILE: ch01.org\n  :END:\n** Uses\n- [[id:mara][Mara]]\n")
+	write(t, filepath.Join(v.BooksPath(), "hot-desk", "ch01.org"), "#+TITLE: The desk\n\nMara sat. [[file:../../notes/mara.org]]\n")
+	ix, err := Build(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bl := ix.Backlinks["mara"]
+	if len(bl) != 2 || bl[0] != "book:book/hot-desk/outline.org" || bl[1] != "book:book/hot-desk/ch01.org" {
+		t.Errorf("backlinks of mara = %v", bl)
+	}
+	if n := ix.Get("book:book/hot-desk/ch01.org"); n == nil || n.Kind != KindChapter || n.Title != "Hot Desk · The desk" || n.Words != 3 {
+		t.Errorf("chapter node: %+v", n)
+	}
+	if out := ix.Outgoing["hub"]; len(out) != 1 || out[0] != "book:book/hot-desk/outline.org" {
+		t.Errorf("hub → outline via relative path: %v, dangling %v", out, ix.Dangling)
+	}
+	if len(ix.Missing()) != 0 || len(ix.Orphans()) != 0 {
+		t.Errorf("missing=%v orphans=%v", ix.Missing(), ix.Orphans())
+	}
+}
