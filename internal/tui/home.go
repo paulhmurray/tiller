@@ -172,6 +172,8 @@ type Model struct {
 	showKeys bool   // which-key panel visible
 	prefDir  string
 
+	noteRows, dayRows int // home list sizes after fitting to the window height
+
 	goals  []vault.Goal
 	goal   *vault.Goal
 	goalID string
@@ -183,7 +185,7 @@ func New(v vault.Vault, editor string) Model {
 	ti := textinput.New()
 	ti.CharLimit = 120
 	ti.Width = 50
-	m := Model{v: v, editor: editor, input: ti, clip: wlCopy, prefDir: defaultPrefDir()}
+	m := Model{v: v, editor: editor, input: ti, clip: wlCopy, prefDir: defaultPrefDir(), noteRows: recentNotes, dayRows: recentDays}
 	if dir, err := os.UserCacheDir(); err == nil {
 		m.trashDir = filepath.Join(dir, "tiller", "trash")
 	}
@@ -285,20 +287,9 @@ func (m *Model) buildItems() {
 			}
 			m.items = append(m.items, m.goalItem("goals", g))
 		}
-		for i := len(m.days) - 1; i >= 0 && i >= len(m.days)-recentDays; i-- {
-			d := m.days[i]
-			first := ""
-			if len(d.Entries) > 0 {
-				first = d.Entries[0].Title
-			}
-			m.items = append(m.items, m.dayItem("recent journal", d.Date, d.Path, first, d.Words))
-		}
-		for i, n := range m.ix.Notes() {
-			if i >= recentNotes {
-				break
-			}
-			m.items = append(m.items, m.noteItem("recent notes", n))
-		}
+		m.noteRows, m.dayRows = recentNotes, recentDays
+		m.appendHomeLists()
+		m.fitHome()
 	case screenGoals, screenGoal, screenGoalWalk:
 		m.buildGoalItems()
 	case screenNotes:
@@ -362,6 +353,59 @@ func (m *Model) buildItems() {
 	if m.cursor >= len(m.items) {
 		m.cursor = max(0, len(m.items)-1)
 	}
+}
+
+func (m *Model) appendHomeLists() {
+	for i := len(m.days) - 1; i >= 0 && i >= len(m.days)-m.dayRows; i-- {
+		d := m.days[i]
+		first := ""
+		if len(d.Entries) > 0 {
+			first = d.Entries[0].Title
+		}
+		m.items = append(m.items, m.dayItem("recent journal", d.Date, d.Path, first, d.Words))
+	}
+	for i, n := range m.ix.Notes() {
+		if i >= m.noteRows {
+			break
+		}
+		m.items = append(m.items, m.noteItem("recent notes", n))
+	}
+}
+
+// fitHome shortens the journal and notes lists until the whole home screen,
+// key panel included, fits the window. Each list keeps at least three rows;
+// if that is still too tall View falls back to the wrapped one-line help.
+func (m *Model) fitHome() {
+	if !m.showKeys || m.height <= 0 {
+		return
+	}
+	for {
+		over := m.homeRows() + m.panelRows() - m.height
+		if over <= 0 {
+			return
+		}
+		switch {
+		case m.noteRows > 3:
+			m.noteRows = max(3, m.noteRows-over)
+		case m.dayRows > 3:
+			m.dayRows = max(3, m.dayRows-over)
+		default:
+			return
+		}
+		m.items = m.items[:0]
+		for _, g := range m.activeGoals() {
+			if len(m.items) >= 5 {
+				break
+			}
+			m.items = append(m.items, m.goalItem("goals", g))
+		}
+		m.appendHomeLists()
+	}
+}
+
+// homeRows is the height of everything above the key panel, padding included.
+func (m Model) homeRows() int {
+	return strings.Count(m.renderTop(), "\n") + strings.Count(m.renderRows(), "\n") + 2 + 1
 }
 
 func stamp(n *index.Node) time.Time {
@@ -459,6 +503,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.screen == screenHome {
+			m.buildItems()
+		}
 		return m, nil
 	case editDone:
 		m.reload()
@@ -883,7 +930,8 @@ func (m Model) updateNewNote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) View() string {
+// renderTop is the banner or title line plus the screen's header block.
+func (m Model) renderTop() string {
 	var b strings.Builder
 	date := sDim.Render(m.now.Format("Monday 2 January 2006"))
 	useBanner := m.screen == screenHome && m.width >= 60 && m.height >= 28
@@ -965,7 +1013,12 @@ func (m Model) View() string {
 	case screenGoal, screenGoalWalk:
 		m.viewGoalHeader(&b)
 	}
+	return b.String()
+}
 
+// renderRows is the cursor list with its section and column headers.
+func (m Model) renderRows() string {
+	var b strings.Builder
 	cols := m.columns()
 	section := ""
 	for i, it := range m.items {
@@ -976,6 +1029,13 @@ func (m Model) View() string {
 		}
 		b.WriteString(cols.row(it, i == m.cursor) + "\n")
 	}
+	return b.String()
+}
+
+func (m Model) View() string {
+	var b strings.Builder
+	b.WriteString(m.renderTop())
+	b.WriteString(m.renderRows())
 	switch {
 	case m.screen == screenNote && len(m.items) == 0:
 		b.WriteString("\n" + sWarn.Render("no links in or out") + sDim.Render("  an orphan; y copies a link to paste into a related note") + "\n")
@@ -1032,17 +1092,13 @@ func (m Model) View() string {
 		b.WriteString("\n" + sDim.Render(m.status) + "\n")
 	}
 	body := b.String()
-	// The panel is the default; it collapses to one line when the screen
-	// can't fit it, so nothing scrolls off the top.
+	// The panel is the default; when the screen can't fit it, the help wraps
+	// on key boundaries instead so nothing scrolls off the top.
 	used := strings.Count(body, "\n") + 3
 	if m.showKeys && (m.height <= 0 || used+m.panelRows() <= m.height) {
 		return sPadding.Render(body + "\n" + m.keyPanel())
 	}
-	help := m.helpLine()
-	if m.showKeys {
-		help += sDim.Render(fmt.Sprintf("   (key panel needs %d more rows)", used+m.panelRows()-m.height))
-	}
-	return sPadding.Render(body + sHelp.Render(help))
+	return sPadding.Render(body + sHelp.Render(strings.Join(m.helpLines(), "\n")))
 }
 
 func (m Model) viewHomeStats(b *strings.Builder) {

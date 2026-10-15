@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
 	"os"
 	"path/filepath"
 	"strings"
@@ -373,5 +376,53 @@ func TestNewGoalEscSaves(t *testing.T) {
 	m = key(m, "esc")
 	if len(m.goals) != 1 || m.goals[0].Title != "Draft the book outline" || m.goals[0].Why != "because it matters" || !strings.Contains(m.status, "saved early") {
 		t.Fatalf("esc after a title should save the draft: %+v %q", m.goals, m.status)
+	}
+}
+
+// A scratchpad-sized window (41x142) must still show the key panel on the
+// home screen, by trimming the lists, and never exceed the window height.
+func TestHomeFitsScratchpad(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	os.MkdirAll(v.NotesPath(), 0o755)
+	for i := 0; i < 12; i++ {
+		os.WriteFile(filepath.Join(v.NotesPath(), fmt.Sprintf("n%02d.org", i)), []byte(fmt.Sprintf("#+TITLE: Note %d\n#+FILETAGS: :fleeting:\n", i)), 0o644)
+		day := time.Now().AddDate(0, 0, -i)
+		os.WriteFile(v.DayPath(day), []byte("#+TITLE: x\n\n* entry\ntext\n"), 0o644)
+	}
+	v.AddGoal("A goal", "", "", "", nil, time.Now())
+	m := New(v, "true")
+	m.prefDir = filepath.Join(root, "prefs")
+	mm, _ := m.Update(tea.WindowSizeMsg{Width: 142, Height: 41})
+	m = mm.(Model)
+	out := m.View()
+	rows := strings.Count(out, "\n") + 1
+	if rows > 41 {
+		t.Errorf("home is %d rows, window is 41:\n%s", rows, out)
+	}
+	if !strings.Contains(out, "hide / show these keys") {
+		t.Errorf("panel should fit after trimming:\n%s", out)
+	}
+	if m.noteRows >= recentNotes {
+		t.Errorf("notes list should have been trimmed, got %d", m.noteRows)
+	}
+	// A hopelessly short window falls back to wrapped help, still within height.
+	mm, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
+	m = mm.(Model)
+	out = m.View()
+	lines := strings.Split(out, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, "j/k move") {
+			start = i
+		}
+	}
+	if start < 0 || start == len(lines)-2 {
+		t.Fatalf("help should be present and wrapped onto several lines:\n%s", out)
+	}
+	for _, l := range lines[start:] {
+		if lipgloss.Width(strings.TrimRight(l, " ")) > 60 {
+			t.Errorf("help line wider than the window: %q", l)
+		}
 	}
 }

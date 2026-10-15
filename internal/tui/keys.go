@@ -150,14 +150,36 @@ func (m Model) bindings() []binding {
 	return keysHome
 }
 
-func (m Model) helpLine() string {
-	var parts []string
-	for _, b := range m.bindings() {
-		if b.primary {
-			parts = append(parts, sCursor.Render(b.key)+" "+sDim.Render(b.desc))
-		}
+// helpLines is the compact help, wrapped on key boundaries to the width.
+func (m Model) helpLines() []string {
+	width := m.width
+	if width <= 0 {
+		width = 100
 	}
-	return strings.Join(parts, "   ")
+	width -= 4
+	var lines []string
+	line, used := "", 0
+	for _, b := range m.bindings() {
+		if !b.primary {
+			continue
+		}
+		cell := sCursor.Render(b.key) + " " + sDim.Render(b.desc)
+		w := len([]rune(b.key)) + 1 + len([]rune(b.desc))
+		if line != "" && used+3+w > width {
+			lines = append(lines, line)
+			line, used = "", 0
+		}
+		if line != "" {
+			line += "   "
+			used += 3
+		}
+		line += cell
+		used += w
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // keyPanel is the which-key style table: every binding, in columns.
@@ -173,7 +195,7 @@ func (m Model) keyPanel() string {
 	if width <= 0 {
 		width = 100
 	}
-	cols := max(1, min(3, (width-4)/(cellW+3)))
+	cols := max(1, min(4, (width-4)/(cellW+3)))
 	rows := (len(bs) + cols - 1) / cols
 	var sb strings.Builder
 	sb.WriteString(sDim.Render(strings.Repeat("─", min(width-4, cols*(cellW+3)))) + "\n")
