@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tiller graph</title>
+<style>
+:root{--bg:#faf9f7;--ink:#1a1a1a;--muted:#6b6962;--panel:#f1eee9;--line:#c9c5bc;--accent:#5c1f2e;
+  --fleeting:#d98b1a;--literature:#2f6f9f;--hub:#5c1f2e;--permanent:#3a3a3a;--day:#6a9b57;--missing:#b0aca3;color-scheme:light dark}
+@media (prefers-color-scheme: dark){:root{--bg:#161616;--ink:#e8e6e1;--muted:#9a978f;--panel:#222;--line:#444;--accent:#d98fa0;--permanent:#cfcbc2;--missing:#5a574f}}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.45 Georgia,serif;overflow:hidden}
+#bar{position:fixed;top:0;left:0;right:0;display:flex;gap:14px;align-items:center;padding:10px 16px;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(6px);z-index:2}
+#bar h1{font-size:17px;margin:0;font-weight:600;color:var(--accent)}
+#bar input{font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);width:220px}
+#bar .legend{display:flex;gap:12px;margin-left:auto;color:var(--muted);font-size:13px}
+#bar .legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;background:var(--c);vertical-align:-1px}
+#bar .legend .missing::before{background:none;border:1.5px dashed var(--missing)}
+#stats{color:var(--muted);font-size:13px}
+svg{width:100%;height:100%;display:block;cursor:grab}
+svg:active{cursor:grabbing}
+.link{stroke:var(--line);stroke-opacity:.7}
+.node circle{stroke:var(--bg);stroke-width:1.5px;cursor:pointer}
+.node.missing circle{fill:none;stroke:var(--missing);stroke-dasharray:3 2}
+.node text{font-size:11px;fill:var(--muted);pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px}
+.node.dim{opacity:.15}
+.node.hit circle{stroke:var(--accent);stroke-width:3px}
+#panel{position:fixed;top:0;right:0;bottom:0;width:min(440px,90vw);background:var(--panel);border-left:1px solid var(--line);padding:56px 20px 20px;overflow:auto;transform:translateX(100%);transition:transform .2s;z-index:1}
+#panel.open{transform:none}
+#panel h2{margin:0 0 4px;font-size:20px;color:var(--accent)}
+#panel .meta{color:var(--muted);font-size:13px;margin-bottom:12px}
+#panel .tag{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 6px;margin-right:4px;font-size:12px}
+#panel pre{white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace;color:var(--ink)}
+#panel .close{position:absolute;top:52px;right:16px;border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer}
+#panel ul{padding-left:18px;margin:4px 0 12px}
+#panel a{color:var(--accent);cursor:pointer}
+</style>
+<body>
+<div id="bar"><h1>tiller</h1><input id="q" placeholder="filter titles…" autofocus><span id="stats"></span>
+<div class="legend"><span style="--c:var(--permanent)">permanent</span><span style="--c:var(--fleeting)">fleeting</span><span style="--c:var(--literature)">literature</span><span style="--c:var(--hub)">hub</span><span style="--c:var(--day)">journal</span><span class="missing">missing</span></div></div>
+<svg></svg>
+<aside id="panel"><button class="close" title="close">×</button><div id="panel-body"></div></aside>
+<script type="application/json" id="data"><!--DATA--></script>
+<!--D3-->
+<script>
+const data = JSON.parse(document.getElementById('data').textContent);
+const byId = new Map(data.nodes.map(n => [n.id, n]));
+document.getElementById('stats').textContent =
+  `${data.nodes.filter(n=>n.kind==='note').length} notes · ${data.links.filter(l=>!l.target.startsWith('missing:')).length} links · generated ${data.generated}`;
+const svg = d3.select('svg'), W = () => innerWidth, H = () => innerHeight;
+const g = svg.append('g');
+svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
+const color = n => getComputedStyle(document.documentElement).getPropertyValue('--' + n.life).trim();
+const radius = n => n.kind === 'missing' ? 5 : 5 + Math.sqrt(n.degree) * 3;
+const sim = d3.forceSimulation(data.nodes)
+  .force('link', d3.forceLink(data.links).id(d => d.id).distance(95).strength(0.5))
+  .force('charge', d3.forceManyBody().strength(-420))
+  .force('center', d3.forceCenter(W() / 2, H() / 2))
+  .force('collide', d3.forceCollide(d => radius(d) + 10));
+const link = g.append('g').selectAll('line').data(data.links).join('line').attr('class', 'link');
+const node = g.append('g').selectAll('g').data(data.nodes).join('g')
+  .attr('class', d => 'node ' + d.kind)
+  .call(d3.drag()
+    .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = d.fy = null; }))
+  .on('click', (e, d) => { e.stopPropagation(); show(d); });
+node.append('circle').attr('r', radius).attr('fill', d => d.kind === 'missing' ? 'none' : color(d));
+node.append('text').attr('dx', d => radius(d) + 4).attr('dy', '0.35em').text(d => d.title);
+node.append('title').text(d => d.title);
+sim.on('tick', () => {
+  link.attr('x1', d => d.source.x).attr('y1', d => d.source.y).attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+  node.attr('transform', d => `translate(${d.x},${d.y})`);
+});
+addEventListener('resize', () => sim.force('center', d3.forceCenter(W() / 2, H() / 2)).alpha(0.3).restart());
+const panel = document.getElementById('panel'), body = document.getElementById('panel-body');
+function esc(s) { return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function list(title, ids) {
+  if (!ids.length) return '';
+  return `<div class="meta">${title}</div><ul>` + ids.map(id => {
+    const n = byId.get(id); return `<li><a data-id="${esc(id)}">${esc(n ? n.title : id)}</a></li>`; }).join('') + '</ul>';
+}
+function show(d) {
+  node.classed('hit', n => n === d);
+  const tags = (d.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+  const meta = d.kind === 'missing'
+    ? `referenced but not written yet`
+    : `${d.life}${d.words ? ` · ${d.words} words` : ''}${d.created ? ` · ${esc(d.created)}` : ''}`;
+  body.innerHTML = `<h2>${esc(d.title)}</h2><div class="meta">${meta}</div><div>${tags}</div>` +
+    list('links to', d.out || []) + list('linked from', d.in || []) +
+    (d.body ? `<pre>${esc(d.body)}</pre>` : '');
+  panel.classList.add('open');
+  body.querySelectorAll('a[data-id]').forEach(a => a.onclick = () => { const n = byId.get(a.dataset.id); if (n) show(n); });
+}
+panel.querySelector('.close').onclick = () => { panel.classList.remove('open'); node.classed('hit', false); };
+svg.on('click', () => { panel.classList.remove('open'); node.classed('hit', false); });
+document.getElementById('q').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase();
+  node.classed('dim', d => q && !d.title.toLowerCase().includes(q) && !(d.tags || []).some(t => t.includes(q)));
+});
+</script>
+</body>
+</html>
