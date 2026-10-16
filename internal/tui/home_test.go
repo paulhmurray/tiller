@@ -591,3 +591,39 @@ func TestBookShowsItsNotes(t *testing.T) {
 		t.Fatalf("t should list all hotdesk notes: screen=%d query=%q items=%d", m.screen, m.query, len(m.items))
 	}
 }
+
+func TestBreadcrumbsShowTheTrail(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	os.MkdirAll(v.NotesPath(), 0o755)
+	os.WriteFile(filepath.Join(v.NotesPath(), "booking-a-desk.org"), []byte(":PROPERTIES:\n:ID: booking-a-desk\n:END:\n#+TITLE: Booking a desk\n#+FILETAGS: :fleeting:hotdesk:\n\n[[id:spacehub]]\n"), 0o644)
+	os.WriteFile(filepath.Join(v.NotesPath(), "spacehub.org"), []byte(":PROPERTIES:\n:ID: spacehub\n:END:\n#+TITLE: SpaceHub\n#+FILETAGS: :fleeting:hotdesk:\n"), 0o644)
+	v.NewBook("Hot Desk", 70000, time.Now())
+	m := New(v, "true")
+	m.width, m.height = 140, 60
+	m.prefDir = filepath.Join(root, "prefs")
+	m = key(m, "B")
+	for i := range m.items {
+		if m.items[i].label == "Booking a desk" {
+			m.cursor = i
+		}
+	}
+	m = key(m, "enter")
+	m = key(m, "enter") // follow the link to SpaceHub
+	out := m.View()
+	for _, want := range []string{"tiller", "Hot Desk", "Booking a desk", "SpaceHub"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("trail missing %q:\n%s", want, out)
+		}
+	}
+	first := strings.SplitN(out, "\n", 3)[1]
+	if !(strings.Index(first, "Hot Desk") < strings.Index(first, "Booking a desk") && strings.Index(first, "Booking a desk") < strings.Index(first, "SpaceHub")) {
+		t.Errorf("trail out of order: %q", first)
+	}
+	// Narrow window: the middle collapses, ends stay.
+	m.width = 70
+	first = strings.SplitN(m.View(), "\n", 3)[1]
+	if !strings.Contains(first, "…") || !strings.Contains(first, "SpaceHub") || !strings.Contains(first, "Hot Desk") {
+		t.Errorf("narrow trail should collapse the middle: %q", first)
+	}
+}

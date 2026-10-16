@@ -1106,25 +1106,7 @@ func (m Model) renderTop() string {
 		}
 		b.WriteString("\n")
 	} else {
-		title := sTitle.Render("tiller")
-		switch m.screen {
-		case screenNote:
-			title += sDim.Render("  ›  ") + sValue.Render(m.note.Title)
-		case screenNotes:
-			title += sDim.Render("  ›  ") + sValue.Render(m.filter.String())
-		case screenProcess:
-			title += sDim.Render("  ›  ") + sValue.Render("process")
-		case screenGoals:
-			title += sDim.Render("  ›  ") + sValue.Render("goals")
-		case screenGoal, screenGoalWalk:
-			title += sDim.Render("  ›  ") + sValue.Render(m.goal.Title)
-		case screenBooks:
-			title += sDim.Render("  ›  ") + sValue.Render("books")
-		case screenBook:
-			title += sDim.Render("  ›  ") + sValue.Render(m.book.Title)
-		case screenGuide:
-			title += sDim.Render("  ›  ") + sValue.Render("how tiller fits together")
-		}
+		title := m.breadcrumbs()
 		gap := max(1, m.width-4-lipgloss.Width(title)-lipgloss.Width(date))
 		b.WriteString(title + strings.Repeat(" ", gap) + date + "\n\n")
 	}
@@ -1150,6 +1132,89 @@ func (m Model) renderTop() string {
 		m.viewGuide(&b)
 	}
 	return b.String()
+}
+
+// crumbLabel names one place in the trail.
+func (m Model) crumbLabel(f frame) string {
+	switch f.screen {
+	case screenNotes:
+		if f.query != "" {
+			return f.filter.String() + " / " + f.query
+		}
+		return f.filter.String()
+	case screenNote:
+		if n := m.ix.Get(f.note); n != nil {
+			return n.Title
+		}
+	case screenProcess:
+		return "process"
+	case screenGoals:
+		return "goals"
+	case screenGoal, screenGoalWalk:
+		if g := m.findGoal(f.goal); g != nil {
+			return g.Title
+		}
+	case screenBooks:
+		return "books"
+	case screenBook:
+		if b := m.findBook(f.book); b != nil {
+			return b.Title
+		}
+	case screenGuide:
+		return "how tiller fits together"
+	}
+	return ""
+}
+
+// breadcrumbs is the whole trail from home to here, so the way back is
+// visible. When it would not fit beside the date, the middle collapses to
+// an ellipsis and the first and last steps stay.
+func (m Model) breadcrumbs() string {
+	here := frame{screen: m.screen, filter: m.filter, query: m.query}
+	if m.note != nil {
+		here.note = m.note.Key
+	}
+	if m.goal != nil {
+		here.goal = m.goal.ID
+	}
+	if m.book != nil {
+		here.book = m.book.Slug
+	}
+	var labels []string
+	for _, f := range m.stack {
+		if l := m.crumbLabel(f); l != "" {
+			labels = append(labels, l)
+		}
+	}
+	if l := m.crumbLabel(here); l != "" {
+		labels = append(labels, l)
+	}
+	sep := sDim.Render("  ›  ")
+	render := func(ls []string) string {
+		out := sTitle.Render("tiller")
+		for i, l := range ls {
+			if i == len(ls)-1 {
+				out += sep + sValue.Render(l)
+			} else {
+				out += sep + sDim.Render(l)
+			}
+		}
+		return out
+	}
+	width := m.width
+	if width <= 0 {
+		width = 100
+	}
+	room := width - 4 - 28 // the date and a gap
+	out := render(labels)
+	for len(labels) > 2 && lipgloss.Width(out) > room {
+		labels = append([]string{labels[0], "…"}, labels[2:]...)
+		if labels[2] == "…" {
+			labels = append(labels[:1], labels[2:]...)
+		}
+		out = render(labels)
+	}
+	return out
 }
 
 // renderRows is the cursor list with its section and column headers.
