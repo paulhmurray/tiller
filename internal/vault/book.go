@@ -14,8 +14,9 @@ import (
 )
 
 // A book lives in <root>/book/<slug>/: outline.org holds the chapters as
-// level-1 headings, each with a :FILE: property naming the prose file beside
-// it. The outline carries its own TODO keywords so chapter status reads as
+// level-1 headings that carry a stage keyword, each with a :FILE: property
+// naming the prose file beside it. Level-1 headings without a keyword
+// (Premise, Story map, Characters) are planning space and are left alone. The outline carries its own TODO keywords so chapter status reads as
 // writing stages in nvim's agenda too:
 //
 //	#+TITLE: Hot Desk
@@ -138,9 +139,13 @@ func ParseBook(outline string) (Book, error) {
 		if h.Level != 1 {
 			continue
 		}
+		m := stageRe.FindStringSubmatch(h.Title)
+		if m == nil && h.Props["FILE"] == "" {
+			continue // a planning heading (premise, story map, characters), not a chapter
+		}
 		n++
 		c := Chapter{Title: h.Title, Line: h.Line}
-		if m := stageRe.FindStringSubmatch(h.Title); m != nil {
+		if m != nil {
 			c.State, c.Title = m[1], strings.TrimSpace(m[2])
 		}
 		file := h.Props["FILE"]

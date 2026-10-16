@@ -47,9 +47,9 @@ func TestBook(t *testing.T) {
 		t.Errorf("cycle should wrap, got %s", b.Chapters[0].State)
 	}
 	// Positional fallback for a hand-written heading, and :FILE: wins when present.
-	os.WriteFile(b.Outline, []byte("#+TITLE: Hot Desk\n\n* DRAFT Hand written\n* OUTLINE Explicit\n  :PROPERTIES:\n  :FILE: ch01.org\n  :END:\n"), 0o644)
+	os.WriteFile(b.Outline, []byte("#+TITLE: Hot Desk\n\n* Premise\nplanning text, not a chapter\n* Story map\n* DRAFT Hand written\n* OUTLINE Explicit\n  :PROPERTIES:\n  :FILE: ch01.org\n  :END:\n"), 0o644)
 	b, _ = v.Book("hot-desk")
-	if filepath.Base(b.Chapters[0].File) != "ch01.org" || filepath.Base(b.Chapters[1].File) != "ch01.org" || b.Chapters[0].State != "DRAFT" {
+	if len(b.Chapters) != 2 || filepath.Base(b.Chapters[0].File) != "ch01.org" || filepath.Base(b.Chapters[1].File) != "ch01.org" || b.Chapters[0].State != "DRAFT" {
 		t.Errorf("file resolution: %+v", b.Chapters)
 	}
 	// Today's words: snapshot on first look, delta after, reset on a new day.
