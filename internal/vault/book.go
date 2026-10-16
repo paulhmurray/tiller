@@ -55,6 +55,7 @@ type Book struct {
 	Outline  string
 	Title    string
 	Target   int
+	Tag      string   // the zettelkasten tag for notes about this book
 	Stages   []string // active keywords then done ones, in cycle order
 	Chapters []Chapter
 }
@@ -84,6 +85,9 @@ func (b Book) LastEdited() time.Time {
 	}
 	return t
 }
+
+// HubID is the id of the book's map-of-content note, notes/hub-<slug>.org.
+func (b Book) HubID() string { return "hub-" + b.Slug }
 
 func (v Vault) BooksPath() string { return filepath.Join(v.Root, BooksDir) }
 
@@ -118,6 +122,10 @@ func ParseBook(outline string) (Book, error) {
 	b := Book{Slug: filepath.Base(dir), Dir: dir, Outline: outline, Title: doc.Title(), Stages: defaultStages}
 	if b.Title == "" {
 		b.Title = strings.ReplaceAll(b.Slug, "-", " ")
+	}
+	b.Tag = strings.ReplaceAll(b.Slug, "-", "")
+	if t, ok := doc.Keyword("TAG"); ok && strings.TrimSpace(t) != "" {
+		b.Tag = strings.Trim(strings.TrimSpace(t), ":")
 	}
 	if t, ok := doc.Keyword("TARGET"); ok {
 		fmt.Sscanf(strings.ReplaceAll(t, ",", ""), "%d", &b.Target)
@@ -191,11 +199,11 @@ func (v Vault) NewBook(title string, target int, now time.Time) (Book, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Book{}, err
 	}
-	content := fmt.Sprintf("#+TITLE: %s\n#+TARGET: %d\n#+TODO: OUTLINE DRAFT REVISE | DONE\n#+CREATED: %s\n#+STARTUP: content\n\n"+
+	content := fmt.Sprintf("#+TITLE: %s\n#+TARGET: %d\n#+TAG: %s\n#+TODO: OUTLINE DRAFT REVISE | DONE\n#+CREATED: %s\n#+STARTUP: content\n\n"+
 		"# One level-1 heading per chapter. The heading's keyword is the chapter's\n"+
 		"# stage; the first line under it is the promise: what the chapter does for\n"+
 		"# the reader. Links under \"Uses\" point at the notes it draws on.\n",
-		title, target, org.Stamp(now))
+		title, target, strings.ReplaceAll(slug, "-", ""), org.Stamp(now))
 	if err := os.WriteFile(outline, []byte(content), 0o644); err != nil {
 		return Book{}, err
 	}

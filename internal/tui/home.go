@@ -817,6 +817,22 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// noteContext is what a new note inherits from where n was pressed: the
+// book's tag and a link to its hub from a book screen, or a link back to
+// the note on screen when N was used.
+func (m *Model) noteContext() (tags []string, links []vault.LinkTo) {
+	if from := m.ix.Get(m.linkFrom); from != nil {
+		links = append(links, vault.LinkTo{ID: from.ID, Title: from.Title})
+	}
+	if m.book != nil {
+		tags = append(tags, m.book.Tag)
+		if hub := m.ix.Get(m.book.HubID()); hub != nil && m.linkFrom == "" {
+			links = append(links, vault.LinkTo{ID: hub.ID, Title: hub.Title})
+		}
+	}
+	return tags, links
+}
+
 // --- new note: kind, then title ---
 
 func (m *Model) startNew() tea.Cmd {
@@ -1012,15 +1028,16 @@ func (m Model) updateNewNote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if title == "" {
 			return m, nil
 		}
-		var links []vault.LinkTo
-		if from := m.ix.Get(m.linkFrom); from != nil {
-			links = append(links, vault.LinkTo{ID: from.ID, Title: from.Title})
-		}
-		p, err := m.v.Create(title, m.newKind, nil, links, time.Now())
+		tags, links := m.noteContext()
+		p, err := m.v.Create(title, m.newKind, tags, links, time.Now())
 		if err != nil {
 			m.status = err.Error()
 			return m, nil
 		}
+		// Land on the new note's view, so t, l and friends apply when nvim
+		// closes, and h goes back to where n was pressed.
+		m.reload()
+		m.openNote(strings.ToLower(strings.TrimSuffix(filepath.Base(p), ".org")))
 		return m, m.edit(p, true)
 	}
 	var cmd tea.Cmd
@@ -1169,6 +1186,9 @@ func (m Model) View() string {
 		head := "new " + m.newKind.String() + " note"
 		if from := m.ix.Get(m.linkFrom); from != nil {
 			head += sDim.Render(", linked from " + from.Title)
+		}
+		if m.book != nil {
+			head += sDim.Render(", tagged " + m.book.Tag + " and linked to the " + m.book.Title + " hub")
 		}
 		b.WriteString("\n" + sHeader.Render(head) + "\n  " + m.input.View() + "\n")
 	case modeSearch:

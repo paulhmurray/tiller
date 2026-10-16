@@ -212,8 +212,9 @@ func TestInteractiveRefinement(t *testing.T) {
 	m = key(m, "r")
 
 	// Process mode walks oldest first: Alpha (Jan) before Beta (Feb); s skips, p promotes, end returns.
-	m = key(m, "h")
-	m = key(m, "h")
+	m = key(m, "h") // new note's view
+	m = key(m, "h") // Alpha
+	m = key(m, "h") // all-notes list
 	if m.screen != screenHome {
 		t.Fatalf("expected home, got %d", m.screen)
 	}
@@ -480,5 +481,43 @@ func TestBookFlow(t *testing.T) {
 	m = key(m, "h")
 	if m.screen != screenBook {
 		t.Fatalf("back from guide should return to the book, got %d", m.screen)
+	}
+}
+
+// n from inside a book tags the note for the book, links it to the hub,
+// and lands on the note's view so t and friends apply after nvim.
+func TestNewNoteFromBook(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	os.MkdirAll(v.NotesPath(), 0o755)
+	os.WriteFile(filepath.Join(v.NotesPath(), "hub-hot-desk.org"), []byte(":PROPERTIES:\n:ID: hub-hot-desk\n:END:\n#+TITLE: Hot Desk\n#+FILETAGS: :hub:hotdesk:\n"), 0o644)
+	v.NewBook("Hot Desk", 70000, time.Now())
+	m := New(v, "true")
+	m.width, m.height = 120, 60
+	m.prefDir = filepath.Join(root, "prefs")
+	m = key(m, "B")
+	if m.screen != screenBook || m.book.Tag != "hotdesk" {
+		t.Fatalf("book screen: %d %+v", m.screen, m.book)
+	}
+	m = key(m, "n")
+	m = key(m, "f")
+	if !strings.Contains(m.View(), "tagged hotdesk") {
+		t.Fatalf("prompt should say what the note inherits:\n%s", m.View())
+	}
+	m = key(m, "Kathy books five desks")
+	m = key(m, "enter")
+	b, _ := os.ReadFile(filepath.Join(v.NotesPath(), "kathy-books-five-desks.org"))
+	if !strings.Contains(string(b), "#+FILETAGS: :fleeting:hotdesk:") || !strings.Contains(string(b), "- [[id:hub-hot-desk][Hot Desk]]") {
+		t.Fatalf("note should carry the tag and hub link:\n%s", b)
+	}
+	if m.screen != screenNote || m.note == nil || m.note.Title != "Kathy books five desks" {
+		t.Fatalf("should land on the new note, got screen=%d", m.screen)
+	}
+	if m.ix.Degree(m.note.Key) != 1 {
+		t.Errorf("new note should not be an orphan")
+	}
+	m = key(m, "h")
+	if m.screen != screenBook {
+		t.Errorf("h should return to the book, got %d", m.screen)
 	}
 }
