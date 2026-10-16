@@ -59,13 +59,44 @@ func run(args []string) error {
 		fmt.Println(rel(v.Root, p))
 		return nil
 	case "new":
-		title := strings.TrimSpace(strings.Join(args[1:], " "))
-		if title == "" {
-			return fmt.Errorf("usage: tiller new <title>")
+		// -from <file> makes the new note a spin-off of that note: it inherits
+		// the book tags and links back. -print writes "id<TAB>path<TAB>title"
+		// instead of opening the editor, for the nvim mapping.
+		fs := flag.NewFlagSet("new", flag.ContinueOnError)
+		from := fs.String("from", "", "note the new one is spun off from")
+		print := fs.Bool("print", false, "print id, path and title; do not open the editor")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
 		}
-		p, err := v.NewNote(title, nil, time.Now())
+		title := strings.TrimSpace(strings.Join(fs.Args(), " "))
+		if title == "" {
+			return fmt.Errorf("usage: tiller new [-from file] [-print] <title>")
+		}
+		var tags []string
+		var links []vault.LinkTo
+		if *from != "" {
+			src, err := vault.ParseNote(*from)
+			if err != nil {
+				return fmt.Errorf("-from: %w", err)
+			}
+			if src.ID != "" {
+				links = append(links, vault.LinkTo{ID: src.ID, Title: src.Title})
+			}
+			books, _ := v.Books()
+			for _, b := range books {
+				if src.HasTag(b.Tag) {
+					tags = append(tags, b.Tag)
+				}
+			}
+		}
+		p, err := v.Create(title, vault.KindFleeting, tags, links, time.Now())
 		if err != nil {
 			return err
+		}
+		if *print {
+			n, _ := vault.ParseNote(p)
+			fmt.Printf("%s\t%s\t%s\n", n.ID, p, n.Title)
+			return nil
 		}
 		return openAt(editor, p, vault.WriteLine(p))
 	case "today":
@@ -163,6 +194,7 @@ const usage = `usage:
   tiller                 open the home screen
   tiller jot [text...]   append a line to today's journal, or open it
   tiller new <title...>  create a fleeting note and open it
+                         (-from <note> inherits its book tag and links back; -print instead of opening)
   tiller today           print today's journal path
   tiller migrate [-n]    convert journal.org + zettelkasten/ to the vault layout
   tiller book            list books; book new <title> [-target N] starts one
