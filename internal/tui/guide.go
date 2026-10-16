@@ -43,7 +43,7 @@ var tips = map[screen][]string{
 	},
 	screenNote: {
 		"l links this note to another; it is written under * Related, so nvim follows it too",
-		"L does the reverse: the note you pick gets a link to this one",
+		"L does the reverse: the note you pick gets a link to this one; pick a chapter and it goes under that chapter's Uses",
 		"p promotes, but only once the note is linked: an unlinked permanent note is just an orphan",
 		"N makes a new note that already links back here",
 		"y copies [[id:…][title]] for pasting in nvim with \"+p",

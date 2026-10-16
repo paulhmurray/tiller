@@ -66,3 +66,31 @@ func TestBook(t *testing.T) {
 		t.Errorf("new day should reset, got %d", n)
 	}
 }
+
+func TestAddUse(t *testing.T) {
+	v := Vault{Root: t.TempDir()}
+	b, _ := v.NewBook("Hot Desk", 1000, time.Now())
+	v.AddChapter(b, "One")
+	b, _ = v.Book("hot-desk")
+	v.AddChapter(b, "Two")
+	b, _ = v.Book("hot-desk")
+	ok, err := v.AddUse(b, b.Chapters[0], "booking-a-desk", "Booking a desk")
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	b, _ = v.Book("hot-desk")
+	if ok, _ := v.AddUse(b, b.Chapters[0], "booking-a-desk", "again"); ok {
+		t.Error("duplicate accepted")
+	}
+	if ok, _ := v.AddUse(b, b.Chapters[1], "booking-a-desk", "Booking a desk"); !ok {
+		t.Error("same note under a different chapter should be allowed")
+	}
+	out, _ := os.ReadFile(b.Outline)
+	s := string(out)
+	one := strings.Index(s, "* OUTLINE One")
+	two := strings.Index(s, "* OUTLINE Two")
+	first := strings.Index(s, "- [[id:booking-a-desk][Booking a desk]]")
+	if !(one < first && first < two) || strings.Count(s, "[[id:booking-a-desk]") != 2 || strings.Count(s, "** Uses") != 2 {
+		t.Errorf("uses placement wrong:\n%s", s)
+	}
+}

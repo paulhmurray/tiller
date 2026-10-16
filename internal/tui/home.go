@@ -823,8 +823,14 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) noteContext() (tags []string, links []vault.LinkTo) {
 	if from := m.ix.Get(m.linkFrom); from != nil {
 		links = append(links, vault.LinkTo{ID: from.ID, Title: from.Title})
+		// A note spun off a book note belongs to the same book.
+		for i := range m.books {
+			if from.HasTag(m.books[i].Tag) {
+				tags = append(tags, m.books[i].Tag)
+			}
+		}
 	}
-	if m.book != nil {
+	if m.book != nil && (len(tags) == 0 || tags[0] != m.book.Tag) {
 		tags = append(tags, m.book.Tag)
 		if hub := m.ix.Get(m.book.HubID()); hub != nil && m.linkFrom == "" {
 			links = append(links, vault.LinkTo{ID: hub.ID, Title: hub.Title})
@@ -1187,7 +1193,9 @@ func (m Model) View() string {
 		if from := m.ix.Get(m.linkFrom); from != nil {
 			head += sDim.Render(", linked from " + from.Title)
 		}
-		if m.book != nil {
+		if tags, _ := m.noteContext(); len(tags) > 0 && m.book == nil {
+			head += sDim.Render(", tagged " + strings.Join(tags, " "))
+		} else if m.book != nil {
 			head += sDim.Render(", tagged " + m.book.Tag + " and linked to the " + m.book.Title + " hub")
 		}
 		b.WriteString("\n" + sHeader.Render(head) + "\n  " + m.input.View() + "\n")

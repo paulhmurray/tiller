@@ -319,3 +319,59 @@ func WordsToday(b Book, cacheDir string, now time.Time) int {
 	}
 	return b.Words() - snap.Total
 }
+
+// AddUse links a note from a chapter: "- [[id:id][title]]" under the
+// chapter's "** Uses" heading in the outline, creating the heading at the
+// end of the chapter when needed. False when the link is already there.
+func (v Vault) AddUse(b Book, c Chapter, id, title string) (bool, error) {
+	doc, err := org.ParseFile(b.Outline)
+	if err != nil {
+		return false, err
+	}
+	lines := doc.Lines
+	// Chapter range in the current file: from its heading to the next level-1.
+	start, end := -1, len(lines)
+	for _, h := range doc.Headlines {
+		if h.Level == 1 && start >= 0 {
+			end = h.Line
+			break
+		}
+		if h.Level == 1 && h.Line == c.Line {
+			start = h.Line
+		}
+	}
+	if start < 0 {
+		return false, fmt.Errorf("chapter heading moved; reload")
+	}
+	for _, l := range doc.Links() {
+		if l.Line > start && l.Line < end && strings.EqualFold(strings.TrimSpace(l.Target), "id:"+id) {
+			return false, nil
+		}
+	}
+	entry := "  - " + RenderLink(id, title)
+	at := -1
+	for _, h := range doc.Headlines {
+		if h.Line > start && h.Line < end && h.Level == 2 && strings.EqualFold(strings.TrimSpace(h.Title), "uses") {
+			at = h.End
+			if at > end {
+				at = end
+			}
+			for at > h.Line+1 && strings.TrimSpace(lines[at-1]) == "" {
+				at--
+			}
+			break
+		}
+	}
+	var ins []string
+	if at < 0 {
+		at = end
+		for at > start+1 && strings.TrimSpace(lines[at-1]) == "" {
+			at--
+		}
+		ins = []string{"** Uses", entry}
+	} else {
+		ins = []string{entry}
+	}
+	lines = append(lines[:at], append(ins, lines[at:]...)...)
+	return true, os.WriteFile(b.Outline, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}

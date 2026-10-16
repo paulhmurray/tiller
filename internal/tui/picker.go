@@ -24,6 +24,15 @@ type picker struct {
 	target  string // key of the note being linked
 	cursor  int
 	items   []*index.Node
+	// chapters are offered for L: "Hot Desk · Future of work" rows that
+	// write the link under the chapter's Uses in the outline.
+	chapters []pickChapter
+}
+
+type pickChapter struct {
+	book    vault.Book
+	chapter vault.Chapter
+	node    *index.Node // synthetic, for the row
 }
 
 func (m *Model) startPick(purpose pickPurpose) tea.Cmd {
@@ -32,6 +41,14 @@ func (m *Model) startPick(purpose pickPurpose) tea.Cmd {
 		return nil
 	}
 	m.pick = picker{purpose: purpose, target: n.Key}
+	if purpose == pickLinkIn {
+		for _, b := range m.books {
+			for _, c := range b.Chapters {
+				m.pick.chapters = append(m.pick.chapters, pickChapter{book: b, chapter: c,
+					node: &index.Node{Key: "chapter:" + b.Slug + "/" + c.Title, Title: b.Title + " · " + c.Title, Kind: index.KindChapter, Tags: []string{strings.ToLower(c.State)}}})
+			}
+		}
+	}
 	m.mode = modePick
 	m.input.Placeholder = "type to filter; suggestions shown first"
 	m.input.Prompt = "/ "
@@ -57,6 +74,11 @@ func (m *Model) pickRefresh() {
 	if q == "" {
 		for _, n := range m.ix.Suggest(me, 5) {
 			add(n)
+		}
+	}
+	for _, c := range m.pick.chapters {
+		if q == "" || strings.Contains(strings.ToLower(c.node.Title), q) {
+			add(c.node)
 		}
 	}
 	for _, n := range m.ix.Notes() {
@@ -111,6 +133,23 @@ func (m *Model) linkTo(other *index.Node, purpose pickPurpose) {
 	if me == nil || other == nil {
 		return
 	}
+	if other.Kind == index.KindChapter {
+		for _, c := range m.pick.chapters {
+			if c.node == other {
+				ok, err := m.v.AddUse(c.book, c.chapter, me.ID, me.Title)
+				switch {
+				case err != nil:
+					m.status = err.Error()
+				case !ok:
+					m.status = c.chapter.Title + " already uses " + me.Title
+				default:
+					m.status = "linked: " + c.book.Title + " · " + c.chapter.Title + " uses " + me.Title + "   (written under ** Uses in the outline)"
+				}
+				m.reload()
+				return
+			}
+		}
+	}
 	src, dst := me, other
 	if purpose == pickLinkIn {
 		src, dst = other, me
@@ -130,7 +169,7 @@ func (m *Model) linkTo(other *index.Node, purpose pickPurpose) {
 func (m Model) viewPick(sb *strings.Builder) {
 	what := "link this note to…"
 	if m.pick.purpose == pickLinkIn {
-		what = "add a link to this note inside…"
+		what = "add a link to this note inside… (a chapter puts it under that chapter's Uses)"
 	}
 	sb.WriteString("\n" + sHeader.Render(what) + "\n  " + m.input.View() + "\n")
 	cols := m.columns()
@@ -141,6 +180,9 @@ func (m Model) viewPick(sb *strings.Builder) {
 	for i := start; i < len(m.pick.items) && i < start+pickRows; i++ {
 		n := m.pick.items[i]
 		it := m.noteItem("", n)
+		if n.Kind == index.KindChapter {
+			it = item{kind: rowNote, label: n.Title, tags: n.Tags, degree: 1, age: "chapter"}
+		}
 		if i < 5 && strings.TrimSpace(m.input.Value()) == "" && len(m.ix.Suggest(m.pick.target, 5)) > i {
 			it.age = "suggested"
 		}

@@ -521,3 +521,41 @@ func TestNewNoteFromBook(t *testing.T) {
 		t.Errorf("h should return to the book, got %d", m.screen)
 	}
 }
+
+// L from a note can pick a chapter: the link lands under that chapter's
+// Uses, and N from a book-tagged note inherits the book tag.
+func TestLinkNoteIntoChapter(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	os.MkdirAll(v.NotesPath(), 0o755)
+	os.WriteFile(filepath.Join(v.NotesPath(), "booking-a-desk.org"), []byte(":PROPERTIES:\n:ID: booking-a-desk\n:END:\n#+TITLE: Booking a desk\n#+FILETAGS: :fleeting:hotdesk:\n\nSpaceHub says no.\n"), 0o644)
+	b, _ := v.NewBook("Hot Desk", 70000, time.Now())
+	v.AddChapter(b, "Future of work")
+	m := New(v, "true")
+	m.width, m.height = 120, 60
+	m.prefDir = filepath.Join(root, "prefs")
+	m = key(m, "a")
+	m = key(m, "enter")
+	if m.screen != screenNote || m.note.Title != "Booking a desk" {
+		t.Fatalf("note view: %d %+v", m.screen, m.note)
+	}
+	m = key(m, "L")
+	m = key(m, "future")
+	m = key(m, "enter")
+	out, _ := os.ReadFile(b.Outline)
+	if !strings.Contains(string(out), "** Uses\n  - [[id:booking-a-desk][Booking a desk]]") {
+		t.Fatalf("link should be under the chapter's Uses:\n%s", out)
+	}
+	if bl := m.ix.Backlinks["booking-a-desk"]; len(bl) != 1 || !strings.HasPrefix(bl[0], "book:") {
+		t.Errorf("note should now be linked from the outline: %v", bl)
+	}
+	// N inherits hotdesk from the source note even outside the book screen.
+	m = key(m, "N")
+	m = key(m, "f")
+	m = key(m, "SpaceHub")
+	m = key(m, "enter")
+	nb, _ := os.ReadFile(filepath.Join(v.NotesPath(), "spacehub.org"))
+	if !strings.Contains(string(nb), "#+FILETAGS: :fleeting:hotdesk:") || !strings.Contains(string(nb), "[[id:booking-a-desk][Booking a desk]]") {
+		t.Fatalf("spun-off note should carry the book tag and the back link:\n%s", nb)
+	}
+}
