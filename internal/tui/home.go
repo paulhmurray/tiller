@@ -671,7 +671,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.status = err.Error()
 				return m, nil
 			}
-			return m, m.edit(p, true)
+			return m, m.editAt(p, vault.WriteLine(p))
 		case cur.isDay:
 			return m, m.edit(cur.path, false)
 		default:
@@ -1038,7 +1038,7 @@ func (m Model) updateNewNote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// closes, and h goes back to where n was pressed.
 		m.reload()
 		m.openNote(strings.ToLower(strings.TrimSuffix(filepath.Base(p), ".org")))
-		return m, m.edit(p, true)
+		return m, m.editAt(p, vault.WriteLine(p))
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)

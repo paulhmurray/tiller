@@ -58,3 +58,22 @@ func TestCreateAndAppendLink(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteLine(t *testing.T) {
+	v := Vault{Root: t.TempDir()}
+	now := time.Now()
+	p, _ := v.Create("Plain", KindFleeting, nil, nil, now)
+	if got := WriteLine(p); got != 7 {
+		t.Errorf("plain fleeting: line %d", got)
+	}
+	p, _ = v.Create("Linked", KindFleeting, []string{"hotdesk"}, []LinkTo{{"hub", "Hub"}}, now)
+	if got := WriteLine(p); got != 7 {
+		b, _ := os.ReadFile(p)
+		t.Errorf("linked fleeting: line %d\n%s", got, b)
+	}
+	p, _ = v.Create("Book", KindLiterature, nil, nil, now)
+	if got := WriteLine(p); got != 9 {
+		b, _ := os.ReadFile(p)
+		t.Errorf("literature: line %d\n%s", got, b)
+	}
+}

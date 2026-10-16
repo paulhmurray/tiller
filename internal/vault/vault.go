@@ -454,3 +454,19 @@ func Preview(path string, n int) []string {
 	}
 	return out
 }
+
+// WriteLine is the 1-based line where prose should start in a note: the
+// first blank line after the header, which sits above any Related
+// heading. Falls back to the last line.
+func WriteLine(path string) int {
+	doc, err := org.ParseFile(path)
+	if err != nil {
+		return 0
+	}
+	for i, l := range doc.Lines {
+		if strings.TrimSpace(l) == "" {
+			return i + 1
+		}
+	}
+	return len(doc.Lines)
+}

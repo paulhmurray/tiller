@@ -67,7 +67,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return open(editor, p, true)
+		return openAt(editor, p, vault.WriteLine(p))
 	case "today":
 		fmt.Println(v.DayPath(time.Now()))
 		return nil
@@ -189,6 +189,12 @@ func open(editor, path string, atEnd bool) error {
 	}
 	args = append(args, path)
 	c := exec.Command(editor, args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return c.Run()
+}
+
+func openAt(editor, path string, line int) error {
+	c := exec.Command(editor, fmt.Sprintf("+%d", line), path)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c.Run()
 }
