@@ -75,7 +75,7 @@ var (
 	}, without(keysCommon, kNew))
 	keysBook = concat(keysNav, []binding{
 		{kEnter, "write: open the chapter in nvim", true}, {kOrphans, "open outline at this chapter", true}, {kSkip, "cycle stage", true},
-		{kAll, "add a chapter", true}, {kEdit, "edit the outline", false}, {kBack, "back", true},
+		{kAll, "add a chapter", true}, {kTags, "all notes about this book", true}, {kEdit, "edit the outline", false}, {kBack, "back", true},
 	}, keysCommon)
 	keysGuide = []binding{
 		{kBack, "back", true}, {kHelp, "hide / show these keys", false}, {kQuit, "quit", true},

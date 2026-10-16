@@ -559,3 +559,35 @@ func TestLinkNoteIntoChapter(t *testing.T) {
 		t.Fatalf("spun-off note should carry the book tag and the back link:\n%s", nb)
 	}
 }
+
+func TestBookShowsItsNotes(t *testing.T) {
+	root := t.TempDir()
+	v := vault.Vault{Root: root}
+	os.MkdirAll(v.NotesPath(), 0o755)
+	os.WriteFile(filepath.Join(v.NotesPath(), "booking-a-desk.org"), []byte("#+TITLE: Booking a desk\n#+FILETAGS: :fleeting:hotdesk:\n"), 0o644)
+	os.WriteFile(filepath.Join(v.NotesPath(), "hub-hot-desk.org"), []byte("#+TITLE: Hot Desk\n#+FILETAGS: :hub:hotdesk:\n"), 0o644)
+	os.WriteFile(filepath.Join(v.NotesPath(), "brownies.org"), []byte("#+TITLE: Brownies\n#+FILETAGS: :recipe:\n"), 0o644)
+	v.NewBook("Hot Desk", 70000, time.Now())
+	m := New(v, "true")
+	m.width, m.height = 120, 60
+	m.prefDir = filepath.Join(root, "prefs")
+	m = key(m, "B")
+	out := m.View()
+	if !strings.Contains(out, "notes about this book") || !strings.Contains(out, "Booking a desk") || strings.Contains(out, "Brownies") {
+		t.Fatalf("book notes section wrong:\n%s", out)
+	}
+	for i := range m.items {
+		if m.items[i].label == "Booking a desk" {
+			m.cursor = i
+		}
+	}
+	m = key(m, "enter")
+	if m.screen != screenNote || m.note.Title != "Booking a desk" {
+		t.Fatalf("enter should open the note, got %d", m.screen)
+	}
+	m = key(m, "h")
+	m = key(m, "t")
+	if m.screen != screenNotes || m.query != "hotdesk" || len(m.items) != 2 {
+		t.Fatalf("t should list all hotdesk notes: screen=%d query=%q items=%d", m.screen, m.query, len(m.items))
+	}
+}

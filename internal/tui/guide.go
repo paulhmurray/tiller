@@ -75,6 +75,7 @@ var tips = map[screen][]string{
 		"a adds a chapter at the end and makes its file",
 		"today's words count from the first time tiller looks each day",
 		"n here makes a note already tagged for this book and linked to its hub",
+		"the notes section lists the latest notes tagged for the book; t shows them all, enter opens one",
 	},
 	screenGuide: {
 		"h goes back",

@@ -67,7 +67,30 @@ func (m *Model) buildBookItems() {
 			}
 			m.items = append(m.items, it)
 		}
+		// Notes tagged for this book, newest edit first; t shows them all.
+		shown := 0
+		for _, n := range m.ix.Notes() {
+			if !n.HasTag(m.book.Tag) || n.HasTag("hub") {
+				continue
+			}
+			if shown == bookNoteRows {
+				break
+			}
+			m.items = append(m.items, m.noteItem("notes about this book", n))
+			shown++
+		}
 	}
+}
+
+const bookNoteRows = 8
+
+// openBookNotes is the all-notes list filtered to the book's tag.
+func (m *Model) openBookNotes() {
+	tag := m.book.Tag
+	m.openNotes(filterAll)
+	m.query = tag
+	m.cursor = 0
+	m.buildItems()
 }
 
 // openBooks goes to the list, or straight to the only book.

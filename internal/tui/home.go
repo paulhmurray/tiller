@@ -760,9 +760,12 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.screen == screenNote {
 			return m, m.startPick(pickLinkIn)
 		}
-	case kTags:
-		if m.screen == screenNote {
+	case kTags: // kBookNotes on the book screen
+		switch m.screen {
+		case screenNote:
 			return m, m.startTags()
+		case screenBook:
+			m.openBookNotes()
 		}
 	case kPromote:
 		if m.screen == screenNote {
